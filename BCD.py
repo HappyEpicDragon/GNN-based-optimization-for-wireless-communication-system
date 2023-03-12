@@ -20,22 +20,22 @@ import numpy as np
 
 class BCD:
     def __init__(self, h_d, G, h_r, sigma2, P_T, theta, info):
-        self.h_d = h_d
-        self.h_r = h_r
-        self.G = G
+        self.h_d = np.expand_dims(h_d, 2)
+        self.h_r = np.expand_dims(h_r, 2)
+        self.G = G.T
         self.sigma2 = sigma2
         self.P_T = P_T
-        self.Theta = np.diag(theta)
+        self.Theta = np.diag(theta[0])
         self.M = info.IRS_antennas
         self.N = info.BS_antennas
         self.K = info.user_num
         self.alpha, self.beta, self.epsilon, self.W, self.a, self.b = self.BCD_init()
 
     def BCD_init(self):
-        alpha = np.ones([self.K, 1])
-        beta = np.ones([self.K, 1])
-        epsilon = np.ones([self.K, 1])
-        W = np.zeros([self.K, self.M])
+        alpha = np.ones([self.K, 1]) + 0j
+        beta = np.ones([self.K, 1]) + 0j
+        epsilon = np.ones([self.K, 1]) + 0j
+        W = np.ones([self.K, self.N, 1]) + 0j
         a = None
         b = None
         return alpha, beta, epsilon, W, a, b
@@ -49,6 +49,10 @@ class BCD:
             self.update_epsilon()
             self.update_theta()
             now = self.f1()
+            gamma = self.gamma()
+            s = np.sum(gamma)
+            log_gamma = np.log(1 + gamma / s)
+            print(np.sum(log_gamma))
             if np.linalg.norm(now - last) < eps:
                 return
 
@@ -102,7 +106,7 @@ class BCD:
             h_k = h_dk + np.matmul(np.matmul(G_H, Theta), h_rk)
             alpha_hat_k = alpha_hat[k]
             beta_k = self.beta[k]
-            inv = np.zeros([self.M, self.M])
+            inv = np.zeros([self.N, self.N])
             for i in range(K):
                 h_di = self.h_d[i]
                 h_ri = self.h_r[i]
@@ -113,9 +117,9 @@ class BCD:
                 beta_i = self.beta[i]
                 t = np.matmul(h_i, h_iH)
                 inv = inv + np.power(beta_i, 2) * t
-            inv = Lambda * np.eye(self.M) + inv
+            inv = Lambda * np.eye(self.N) + inv
             inv = np.linalg.inv(inv)
-            w_k = np.sqrt(alpha_hat_k) * beta_k * inv * h_k
+            w_k = np.sqrt(alpha_hat_k) * beta_k * np.matmul(inv, h_k)
             self.W[k] = w_k
 
     def update_epsilon(self):
@@ -142,35 +146,35 @@ class BCD:
 
     def update_theta(self):
         K = self.K
-        U = np.zeros([self.N, self.N])
+        U = np.zeros([self.M, self.M])
         for k in range(K):
             t = self.epsilon[k]
             t = np.power(t, 2)
-            t1 = np.zeros([self.N, self.N])
+            t1 = np.zeros([self.M, self.M])
             for i in range(K):
                 a_ik = self.a[i, k]
                 a_ikH = self.Hermit(a_ik)
                 t1 = t1 + np.matmul(a_ik, a_ikH)
             U = U + t * t1
-        v = np.zeros([1, self.N])
+        v = np.zeros([self.M, 1])
         alpha_hat = self.alpha + 1
         for k in range(K):
             a_kk = self.a[k, k]
             alpha_hat_k = alpha_hat[k]
             epsilon_k = self.epsilon[k]
             t1 = np.sqrt(alpha_hat_k) * epsilon_k.conjugate() * a_kk
-            t2 = np.zeros([1, self.N])
+            t2 = np.zeros([self.M, 1])
             for i in range(K):
                 b_ik = self.b[i, k]
                 a_ik = self.a[i, k]
                 t2 = t2 + b_ik.conjugate() * a_ik
             t2 = t2 * np.power(epsilon_k, 2)
             v = v + t1 - t2
-        N = self.N
-        inv = np.eye(N) + U
+        M = self.M
+        inv = np.eye(M) + U
         inv = np.linalg.inv(inv)
         theta = np.matmul(inv, v)
-        self.Theta = np.diag(theta)
+        self.Theta = np.diag(theta[:, 0])
 
     def f1(self):
         gamma = self.gamma()
@@ -232,7 +236,7 @@ class BCD:
             for k in range(K):
                 h_rk = self.h_r[k]
                 h_rkH = self.Hermit(h_rk)
-                a_ik = np.matmul(np.diag(h_rkH), self.G)
+                a_ik = np.matmul(np.diag(h_rkH[0]), self.G)
                 a_ik = np.matmul(a_ik, w_i)
                 h_dk = self.h_d[k]
                 h_dkH = self.Hermit(h_dk)
