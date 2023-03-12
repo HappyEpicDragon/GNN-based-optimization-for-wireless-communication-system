@@ -28,6 +28,7 @@ class BCD:
         self.Theta = np.diag(theta)
         self.M = info.IRS_antennas
         self.N = info.BS_antennas
+        self.K = info.user_num
         self.alpha, self.beta, self.epsilon, self.W = self.BCD_init()
 
     @staticmethod
@@ -49,6 +50,45 @@ class BCD:
             now = self.f1()
             if np.linalg.norm(now - last) < eps:
                 return
+
+    def update_alpha(self):
+        gamma = self.gamma()
+        K = self.K
+        for k in range(K):
+            self.alpha[k] = gamma[k]
+
+    def update_beta(self):
+        alpha_hat = 1 + self.alpha
+        K = self.K
+        for k in range(K):
+            h_dk = self.h_d[k]
+            h_rk = self.h_r[k]
+            G_H = self.Hermit(self.G)
+            Theta = self.Theta
+            h_k = h_dk + np.matmul(np.matmul(G_H, Theta), h_rk)
+            h_kH = self.Hermit(h_k)
+            alpha_hat_k = alpha_hat[k]
+            w_k = self.W[k]
+            numerator = np.sqrt(alpha_hat_k) * np.matmul(h_kH, w_k)
+            denominator = 0
+            for i in range(K):
+                w_i = self.W[i]
+                t = np.matmul(h_kH, w_i)
+                t = np.linalg.norm(t)
+                t = np.power(t, 2)
+                denominator += t
+            denominator += self.sigma2
+            beta_k = numerator / denominator
+            self.beta[k] = beta_k
+
+    def update_W(self):
+        pass
+
+    def update_epsilon(self):
+        pass
+
+    def update_theta(self):
+        pass
 
     def f1(self):
         gamma = self.gamma()
@@ -76,9 +116,28 @@ class BCD:
             h_rk = self.h_r[k]
             h_dkH = self.Hermit(h_dk)
             h_rkH = self.Hermit(h_rk)
+            Theta_H = self.Hermit(self.Theta)
             w_k = self.W[k]
-            numerator = np.matmul()
-        return None
+            numerator = np.matmul(h_rkH, Theta_H)
+            numerator = np.matmul(numerator, self.G)
+            numerator = numerator + h_dkH
+            numerator = np.matmul(numerator, w_k)
+            numerator = np.linalg.norm(numerator)
+            numerator = np.power(numerator, 2)
+            denominator = 0
+            for i in range(K):
+                w_i = self.W[i]
+                t = np.matmul(h_rkH, Theta_H)
+                t = np.matmul(t, self.G)
+                t = t + h_dkH
+                t = np.matmul(t, w_i)
+                t = np.linalg.norm(t)
+                t = np.power(t, 2)
+                denominator += t
+            denominator += self.sigma2
+            gamma_k = numerator / denominator
+            gamma.append(gamma_k)
+        return np.array(gamma)
 
     @staticmethod
     def Hermit(matrix):
