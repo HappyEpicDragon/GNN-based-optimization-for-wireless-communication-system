@@ -13,7 +13,8 @@ info = info_container(user_num=3,
                       uplink_power=15,
                       downlink_power=20,
                       uplink_noise_power=-100,
-                      downlink_noise_power=-85)
+                      downlink_noise_power=-85,
+                      requires_location=True)
 
 wireless_system = WirelessSystem(info)
 

@@ -9,7 +9,8 @@ class info_container:
                  pilot_length,
                  updating_layer_num,
                  uplink_power, downlink_power,
-                 uplink_noise_power, downlink_noise_power):
+                 uplink_noise_power, downlink_noise_power,
+                 requires_location):
         self.user_num = user_num
         self.user_array = []
         for i in range(user_num):
@@ -25,6 +26,7 @@ class info_container:
         self.downlink_power = downlink_power
         self.uplink_noise_power = uplink_noise_power
         self.downlink_noise_power = downlink_noise_power
+        self.requires_location = requires_location
 
     class Objective:
         def __init__(self, xx, yy, zz):
@@ -53,6 +55,7 @@ class WirelessSystem:
         self.v = np.array([self.v])
         self.uplink_power = info.uplink_power
         self.uplink_noise_power = info.uplink_noise_power
+        self.requires_location = info.requires_location
         self.transmit_parameter_generator()
 
     @staticmethod
@@ -144,6 +147,14 @@ class WirelessSystem:
             output[i] = unit_vec(output[i])
         return output
 
+    @staticmethod
+    def vectorize_2D(Matrix):
+        shape = Matrix.shape
+        v = np.zeros([1, shape[0] * shape[1]])
+        for i in range(shape[0]):
+            v[0, i * shape[1]:(i + 1) * shape[1]] = Matrix[i, :]
+        return v
+
     def transmit_parameter_generator(self):
         RicianFactor = 10  # set number
         h_r_1_LOS = self.a_IRS(1)
@@ -193,33 +204,44 @@ class WirelessSystem:
                 pilot[i, j] = np.random.rand() + np.random.rand() * 1j
 
         pilot = self.Gram_Schmidt(pilot)
+        pilot = np.expand_dims(pilot, 1)
         upPower = np.exp(self.uplink_power / 10 * np.log(10)) / 1000
         cof = self.pilot_length * upPower ** (1 / 2)
         pilot = pilot * cof
-        Y = 0
+        Y = np.zeros([self.user_num, self.M, self.pilot_length])
         upNoisePower = np.exp(self.uplink_noise_power / 10 * np.log(10)) / 1000
         for i in range(self.user_num):
-            Y = Y + (np.array([self.h_d[i]]).T + np.matmul(self.A[i], self.v.T)) * pilot[i].conj()
+            t = np.array([self.h_d[i]]).T + np.matmul(self.A[i], self.v.T)
+            Y_i = np.matmul(t, pilot[i].conj())
+            Y[i] = Y_i
         shape = np.shape(Y)
         for i in range(shape[0]):
             for j in range(shape[1]):
-                Y[i, j] = Y[i, j] + WirelessSystem.complex_Gaussian(upNoisePower)
-        Y_real = np.real(Y)
-        Y_imag = np.imag(Y)
-        shape = torch.Size(np.shape(Y))
-        size = torch.Size([shape[0], shape[1] * 2 + 3])
-        Y = torch.zeros(size)
-        Y[:, 0:shape[1]] = torch.Tensor(Y_real)
-        Y[:, shape[1]:shape[1] * 2] = torch.Tensor(Y_imag)
-        Y[0, shape[1] * 2:shape[1] * 2 + 3] = torch.Tensor([
-            self.user_array[0].xx, self.user_array[0].yy,
-            self.user_array[0].zz])
-        Y[1, shape[1] * 2:shape[1] * 2 + 3] = torch.Tensor(
-            [self.user_array[1].xx, self.user_array[1].yy,
-             self.user_array[1].zz])
-        Y[2, shape[1] * 2:shape[1] * 2 + 3] = torch.Tensor(
-            [self.user_array[2].xx, self.user_array[2].yy,
-             self.user_array[2].zz])
-        Y = Variable(Y, requires_grad=True)
+                for k in range(shape[2]):
+                    Y[i, j, k] = Y[i, j, k] + WirelessSystem.complex_Gaussian(upNoisePower)
         return Y
+
+    def z(self):
+        Y = self.pilot_signal_generator()
+        shape = np.shape(Y)
+        if self.requires_location:
+            z = torch.zeros(torch.Size([self.user_num, 2 * shape[1] * shape[2] + 3]))
+        else:
+            z = torch.zeros(torch.Size([self.user_num, 2 * shape[1] * shape[2]]))
+        for k in range(self.user_num):
+            Y_k = Y[k]
+            y_k = self.vectorize_2D(Y_k)
+            z_k_imag = np.imag(y_k)
+            z_k_real = np.real(y_k)
+            z_k = np.concatenate([z_k_real, z_k_imag], 1)
+            if self.requires_location:
+                z[k, 0:2 * shape[1] * shape[2]] = torch.from_numpy(z_k)
+                z[k, 2 * shape[1] * shape[2]] = self.user_array[k].xx
+                z[k, 2 * shape[1] * shape[2] + 1] = self.user_array[k].yy
+                z[k, 2 * shape[1] * shape[2] + 2] = self.user_array[k].zz
+            else:
+                z[k] = torch.from_numpy(z_k)
+        z = Variable(z, requires_grad=True)
+        return z
+
 

@@ -58,12 +58,10 @@ class Agg_Com(nn.Module):
                 if i == j:
                     pass
                 else:
-                    neighbor[k, :] = Y[j, :]
+                    neighbor[k, :] = torch.clone(Y[j, :])
                     k = k + 1
         else:
-            neighbor = torch.zeros(torch.Size([Y.shape[0], Y.shape[1]]))
-            for j in range(Y.shape[0]):
-                neighbor[j] = Y[j]
+            neighbor = torch.clone(Y)
         shape_nei = neighbor.shape
         temp = torch.clone(neighbor)
         temp = temp.to(self.DEVICE)
@@ -169,7 +167,11 @@ class GNN(nn.Module):
         self.N = info.IRS_antennas
         self.user_nums = info.user_num
         self.updating_layer_num = info.updating_layer_num
-        self.input_dim = 2 * info.pilot_length + 3
+        self.requires_location = info.requires_location
+        if self.requires_location:
+            self.input_dim = 2 * info.pilot_length * info.BS_antennas + 3
+        else:
+            self.input_dim = 2 * info.pilot_length * info.BS_antennas
         self.input_DNNs = []
         for i in range(2):
             self.input_DNNs.append(
@@ -190,10 +192,9 @@ class GNN(nn.Module):
         self.W_normalize = normalization_layer(info).to(self.DEVICE)
         self.v_normalize = normalization_layer(info).to(self.DEVICE)
 
-    def forward(self, Y):
-        shape = Y.shape
-        Y_3D = torch.unsqueeze(Y, 0)
-        avg = F.adaptive_avg_pool2d(Y_3D, output_size=[1, shape[1]])
+    def forward(self, z):
+        shape = z.shape
+        avg = F.adaptive_avg_pool2d(z, output_size=[1, shape[1]])
         temp = torch.clone(avg)
         temp_1 = torch.squeeze(temp)
         avg = torch.unsqueeze(temp_1, 0)
@@ -201,18 +202,18 @@ class GNN(nn.Module):
         avg = self.input_DNNs[0](temp)
         temp = torch.zeros(torch.Size([shape[0], shape[1]]))
         for i in range(shape[0]):
-            temp[i] = self.input_DNNs[1](Y[i])
-        Y = torch.clone(temp)
+            temp[i] = self.input_DNNs[1](z[i])
+        z = torch.clone(temp)
 
         for i in range(len(self.updating_layers)):
-            Y_0, avg_0 = self.updating_layers[i](Y, avg)
-            Y = torch.clone(Y_0)
+            z_0, avg_0 = self.updating_layers[i](z, avg)
+            z = torch.clone(z_0)
             avg = torch.clone(avg_0)
         W_0 = torch.zeros(torch.Size([shape[0], self.N * 2]))
         v_0 = self.linear_layers[0](avg)
-        Y = Y.to(self.DEVICE)
+        z = z.to(self.DEVICE)
         for i in range(shape[0]):
-            W_0[i] = self.linear_layers[1](Y[i])
+            W_0[i] = self.linear_layers[1](z[i])
         W = self.W_normalize(W_0, "W")
         v = self.v_normalize(v_0, 'v')
         W.retain_grad()
