@@ -15,10 +15,7 @@ class System(nn.Module):
         W, v = self.GNN(Y)
         v = torch.atleast_2d(v)
         shape = W.shape
-        W_v = torch.zeros(torch.Size([shape[0] + 1, shape[1]]))
-        W_v[0] = v
-        W_v[1:shape[0] + 1] = W
-        return W_v
+        return W, v
 
 
 class DNN(nn.Module):
@@ -128,7 +125,7 @@ class updating_layer(nn.Module):
         avg = self.agg_com_NN[0](avg_0, Y, 0)
         temp = torch.clone(Y)
         for i in range(1, len(self.agg_com_NN)):
-            Y[i - 1] = self.agg_com_NN[i](avg, temp, i)
+            Y[i - 1] = self.agg_com_NN[i](avg, temp, i - 1)
         return Y, avg
 
 
@@ -165,6 +162,7 @@ class GNN(nn.Module):
         super(GNN, self).__init__()
         self.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
         self.N = info.IRS_antennas
+        self.M = info.BS_antennas
         self.user_nums = info.user_num
         self.updating_layer_num = info.updating_layer_num
         self.requires_location = info.requires_location
@@ -185,16 +183,22 @@ class GNN(nn.Module):
                 updating_layer(self.user_nums, self.IRS_DNN, self.input_dim).to(self.DEVICE)
             )
         self.linear_layers = []
-        for i in range(2):
-            self.linear_layers.append(
-                nn.Linear(self.input_dim, self.N * 2).to(self.DEVICE)
-            )
+        # The first one outputs 2M numbers, which is for W ( beamforming matrix )
+        self.linear_layers.append(
+            nn.Linear(self.input_dim, info.BS_antennas * 2).to(self.DEVICE)
+        )
+        # The second one outputs 2N numbers, which is for v ( reflecting coe )
+        self.linear_layers.append(
+            nn.Linear(self.input_dim, self.N * 2).to(self.DEVICE)
+        )
+
         self.W_normalize = normalization_layer(info).to(self.DEVICE)
         self.v_normalize = normalization_layer(info).to(self.DEVICE)
 
     def forward(self, z):
         shape = z.shape
-        avg = F.adaptive_avg_pool2d(z, output_size=[1, shape[1]])
+        z_3d = torch.unsqueeze(z, 0)
+        avg = F.adaptive_avg_pool2d(z_3d, output_size=[1, shape[1]])
         temp = torch.clone(avg)
         temp_1 = torch.squeeze(temp)
         avg = torch.unsqueeze(temp_1, 0)
@@ -209,11 +213,11 @@ class GNN(nn.Module):
             z_0, avg_0 = self.updating_layers[i](z, avg)
             z = torch.clone(z_0)
             avg = torch.clone(avg_0)
-        W_0 = torch.zeros(torch.Size([shape[0], self.N * 2]))
-        v_0 = self.linear_layers[0](avg)
+        W_0 = torch.zeros(torch.Size([shape[0], self.M * 2]))
+        v_0 = self.linear_layers[1](avg)
         z = z.to(self.DEVICE)
         for i in range(shape[0]):
-            W_0[i] = self.linear_layers[1](z[i])
+            W_0[i] = self.linear_layers[0](z[i])
         W = self.W_normalize(W_0, "W")
         v = self.v_normalize(v_0, 'v')
         W.retain_grad()
@@ -229,10 +233,7 @@ class minus_rate_function(nn.Module):
         self.user_nums = info.user_num
         self.downlink_noise_power = info.downlink_noise_power
 
-    def forward(self, W_v):
-        shape = W_v.shape
-        W = W_v[1:shape[0]]
-        v = W_v[0]
+    def forward(self, W, v):
         shape_W = W.shape
         shape_v = v.shape
         W_real = W[:, 0:np.int_(shape_W[1] / 2)]
@@ -241,16 +242,16 @@ class minus_rate_function(nn.Module):
         A_imag = np.imag(self.A)
         h_d_real = np.real(self.h_d)
         h_d_imag = np.imag(self.h_d)
-        v_real = v[0:np.int_(shape_v[0] / 2)]
-        v_imag = v[np.int_(shape_v[0] / 2):shape_v[0]]
+        v_real = v[0, 0:np.int_(shape_v[1] / 2)]
+        v_imag = v[0, np.int_(shape_v[1] / 2):shape_v[1]]
         n_0 = np.exp(self.downlink_noise_power / 10 * np.log(10)) / 1000
         W_matrix = []
         h_d_matrix = []
         A_matrix = []
         v_matrix = []
-        for i in range(np.shape(W_real)[1]):
-            W_real_i = torch.atleast_2d(W_real[:, i])
-            W_imag_i = torch.atleast_2d(W_imag[:, i])
+        for i in range(np.shape(W_real)[0]):
+            W_real_i = torch.unsqueeze(W_real[i], 0)
+            W_imag_i = torch.unsqueeze(W_imag[i], 0)
             matrix_1_1 = torch.zeros(torch.Size([W_imag_i.shape[0], W_imag_i.shape[1] * 2]))
             matrix_1_1[:, 0:W_imag_i.shape[1]] = W_real_i
             matrix_1_1[:, W_imag_i.shape[1]:W_imag_i.shape[1] * 2] = -W_imag_i
@@ -311,9 +312,9 @@ class minus_rate_function(nn.Module):
             Sum_log = Sum_log + R_k_log
             temp = torch.clone(torch.Tensor([times]))
             times = temp + 1
-
+        output = Sum_log / times
         # expectation = Sum / times
         expectation = -Sum * 1e6
-        print(Sum_log.detach().numpy())
+        print(output.detach().numpy())
         # expectation = - expectation * 10000
         return expectation

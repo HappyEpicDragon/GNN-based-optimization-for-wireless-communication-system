@@ -1,7 +1,7 @@
 from GNN import *
 from Parameters import *
 
-LR = 5 * 1e-2
+LR = 5 * 1e-4
 LR_DECAY = 0.98
 ITERATION_TIMES = 1000
 TRAIN_SAMPLES = 50
@@ -30,11 +30,11 @@ def train():
     for it in range(ITERATION_TIMES):
         z = z_matrix[it]
         for r in range(TRAIN_SAMPLES):
-            W_v = model(z)
-            loss = criterion(W_v)
+            W, v = model(z)
+            loss = criterion(W, v)
             optimizer.zero_grad()
             loss.backward()
-            # nn.utils.clip_grad_norm(model.parameters(), 5, norm_type=2)
+            nn.utils.clip_grad_norm(model.parameters(), 5, norm_type=2)
             optimizer.step()
             loss_history.append(loss.item())
             # print(torch.norm(a))

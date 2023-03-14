@@ -150,7 +150,7 @@ class WirelessSystem:
     @staticmethod
     def vectorize_2D(Matrix):
         shape = Matrix.shape
-        v = np.zeros([1, shape[0] * shape[1]])
+        v = np.zeros([1, shape[0] * shape[1]]) + 0j
         for i in range(shape[0]):
             v[0, i * shape[1]:(i + 1) * shape[1]] = Matrix[i, :]
         return v
@@ -208,7 +208,7 @@ class WirelessSystem:
         upPower = np.exp(self.uplink_power / 10 * np.log(10)) / 1000
         cof = self.pilot_length * upPower ** (1 / 2)
         pilot = pilot * cof
-        Y = np.zeros([self.user_num, self.M, self.pilot_length])
+        Y = np.zeros([self.user_num, self.M, self.pilot_length]) + 0j
         upNoisePower = np.exp(self.uplink_noise_power / 10 * np.log(10)) / 1000
         for i in range(self.user_num):
             t = np.array([self.h_d[i]]).T + np.matmul(self.A[i], self.v.T)
